@@ -5,10 +5,13 @@ import confetti from 'canvas-confetti';
 import BoxTile from '@/components/mystery/BoxTile';
 import PrizeBoard from '@/components/mystery/PrizeBoard';
 import RevealOverlay from '@/components/mystery/RevealOverlay';
-import BankerModal from '@/components/mystery/BankerModal';
 import SwapModal from '@/components/mystery/SwapModal';
-import FinalModal from '@/components/mystery/FinalModal';
 import WonOverlay from '@/components/mystery/WonOverlay';
+import BankerPanel from '@/components/mystery/BankerPanel';
+import FinalDecisionPanel from '@/components/mystery/FinalDecisionPanel';
+import FinalBankerPanel from '@/components/mystery/FinalBankerPanel';
+import SwapConfirmPanel from '@/components/mystery/SwapConfirmPanel';
+import DealPanel from '@/components/mystery/DealPanel';
 import { initGame, unopenedCount, openedCount, computeBankerOffer, splitBoard } from '@/lib/gameLogic';
 import { playBell, playOpen, playWin } from '@/lib/sound';
 
@@ -34,6 +37,9 @@ export default function GameScreen() {
   const [wonPrize, setWonPrize] = useState(null);
   const [otherPrize, setOtherPrize] = useState(null);
   const [sourceLabel, setSourceLabel] = useState('YOU WON!');
+  const [officialPrize, setOfficialPrize] = useState(null);
+  const [finalBankerOffer, setFinalBankerOffer] = useState(null);
+  const [revealReturn, setRevealReturn] = useState('playing');
   const timers = useRef([]);
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
@@ -60,15 +66,17 @@ export default function GameScreen() {
   const eliminatedIds = game.boxes.filter((b) => b.opened).map((b) => b.prize.id);
   const unopened = unopenedCount(game);
   const opened = openedCount(game);
-  const disabled = phase !== 'playing' && phase !== 'swapPick';
+  const disabled = phase !== 'playing' && phase !== 'swapPick' && phase !== 'postDeal';
 
   function handleBoxClick(box) {
     if (phase === 'playing') openBox(box);
     else if (phase === 'swapPick') doSwapPick(box);
+    else if (phase === 'postDeal') openBoxAny(box);
   }
 
   function openBox(box) {
     if (box.isPlayerBox || box.opened) return;
+    setRevealReturn('playing');
     setActiveBoxId(box.id);
     setRevealedPrize(box.prize);
     setPhase('opening');
@@ -85,6 +93,11 @@ export default function GameScreen() {
     const o = openedCount(game);
     setActiveBoxId(null);
     setRevealedPrize(null);
+    if (revealReturn === 'postDeal') {
+      setRevealReturn('playing');
+      setPhase('postDeal');
+      return;
+    }
     if (u === 2) {
       setPhase('final');
       return;
@@ -112,10 +125,8 @@ export default function GameScreen() {
   }
 
   function bankerDeal() {
-    setWonPrize(bankerOffer);
-    setOtherPrize(null);
-    setSourceLabel("YOU TOOK THE BANKER'S DEAL");
-    setPhase('won');
+    setOfficialPrize(bankerOffer);
+    setPhase('deal');
   }
 
   function bankerKeep() {
@@ -147,10 +158,61 @@ export default function GameScreen() {
   }
 
   function finalKeep() {
-    resolveFinal(false);
+    const offer = computeBankerOffer(game, config.bankerPool, config.numBoxes);
+    setFinalBankerOffer(offer);
+    setBankerSub('calling');
+    setPhase('finalKeepBanker');
+    playBell();
+    const t = setTimeout(() => setBankerSub('offer'), 2400);
+    timers.current.push(t);
   }
   function finalSwap() {
+    setBankerSub('calling');
+    setPhase('finalSwapConfirm');
+    playBell();
+    const t = setTimeout(() => setBankerSub('ready'), 2400);
+    timers.current.push(t);
+  }
+  function finalTakeOffer() {
+    setOfficialPrize(finalBankerOffer);
+    setPhase('deal');
+  }
+  function finalTrustBox() {
+    resolveFinal(false);
+  }
+  function swapConfirm() {
     resolveFinal(true);
+  }
+  function swapKeepOriginal() {
+    resolveFinal(false);
+  }
+  function dealEndGame() {
+    setWonPrize(officialPrize);
+    setOtherPrize(null);
+    setSourceLabel('DEAL! YOUR OFFICIAL PRIZE');
+    setPhase('won');
+  }
+  function dealSeeWhat() {
+    setPhase('postDeal');
+  }
+  function postDealEnd() {
+    setWonPrize(officialPrize);
+    setOtherPrize(null);
+    setSourceLabel('DEAL! YOUR OFFICIAL PRIZE');
+    setPhase('won');
+  }
+  function openBoxAny(box) {
+    if (box.opened) return;
+    setRevealReturn('postDeal');
+    setActiveBoxId(box.id);
+    setRevealedPrize(box.prize);
+    setPhase('opening');
+    playOpen();
+    const t = setTimeout(() => {
+      setGame((g) => ({ ...g, boxes: g.boxes.map((b) => (b.id === box.id ? { ...b, opened: true } : b)) }));
+      setPhase('reveal');
+    }, 1300);
+    timers.current.push(t);
   }
 
   function resolveFinal(swapped) {
@@ -195,6 +257,9 @@ export default function GameScreen() {
     setWonPrize(null);
     setOtherPrize(null);
     setPendingSwapPoint(null);
+    setOfficialPrize(null);
+    setFinalBankerOffer(null);
+    setRevealReturn('playing');
   }
 
   const instruction =
@@ -204,6 +269,10 @@ export default function GameScreen() {
       ? 'CHOOSE A BOX TO SWAP WITH YOUR BOX'
       : phase === 'opening'
       ? 'OPENING...'
+      : phase === 'postDeal'
+      ? unopened === 0
+        ? 'ALL BOXES REVEALED'
+        : 'OPEN ANY REMAINING BOX (INCLUDING YOUR BOX)'
       : '';
 
   return (
@@ -242,23 +311,53 @@ export default function GameScreen() {
         </AnimatePresence>
       </div>
 
+      {officialPrize && (phase === 'postDeal' || phase === 'deal') && (
+        <div className="shrink-0 flex items-center justify-center gap-2 md:gap-3 px-3 py-1 bg-amber-500/10 border-y border-amber-400/30 flex-wrap">
+          <span className="text-amber-200 text-[10px] md:text-sm font-bold tracking-wider">WHAT COULD HAVE HAPPENED?</span>
+          <span className="text-white/40">•</span>
+          <span className="text-white text-[10px] md:text-sm font-bold">
+            OFFICIAL WIN: <b className="text-amber-300">{officialPrize.name}</b>
+          </span>
+          {phase === 'postDeal' && (
+            <button
+              onClick={postDealEnd}
+              className="ml-1 md:ml-2 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full bg-amber-400 text-slate-900 text-[10px] md:text-xs font-bold"
+            >
+              END GAME
+            </button>
+          )}
+        </div>
+      )}
+
       <main className="flex-1 min-h-0 grid grid-cols-[70px_1fr_70px] sm:grid-cols-[110px_1fr_110px] md:grid-cols-[1fr_2fr_1fr] lg:grid-cols-[1fr_2.5fr_1fr] gap-1 sm:gap-2 md:gap-4 px-1.5 sm:px-3 md:px-6 pb-2 md:pb-4">
         <div className="min-h-0 overflow-hidden">
           <PrizeBoard prizes={board.left} eliminatedIds={eliminatedIds} align="left" />
         </div>
         <div className="min-h-0 flex items-center justify-center">
-          <div className="grid grid-cols-5 auto-rows-fr gap-1 sm:gap-1.5 md:gap-2.5 h-full w-full">
-            {game.boxes.map((box) => (
-              <BoxTile
-                key={box.id}
-                box={box}
-                disabled={disabled || (phase === 'swapPick' && box.isPlayerBox)}
-                isActive={activeBoxId === box.id}
-                swapPickMode={phase === 'swapPick' && !box.isPlayerBox && !box.opened}
-                onOpen={handleBoxClick}
-              />
-            ))}
-          </div>
+          {phase === 'banker' && bankerOffer ? (
+            <BankerPanel subphase={bankerSub} offer={bankerOffer} onDeal={bankerDeal} onKeep={bankerKeep} />
+          ) : phase === 'final' ? (
+            <FinalDecisionPanel onKeep={finalKeep} onSwap={finalSwap} />
+          ) : phase === 'finalKeepBanker' && finalBankerOffer ? (
+            <FinalBankerPanel subphase={bankerSub} offer={finalBankerOffer} onTake={finalTakeOffer} onTrust={finalTrustBox} />
+          ) : phase === 'finalSwapConfirm' ? (
+            <SwapConfirmPanel subphase={bankerSub} onConfirm={swapConfirm} onKeep={swapKeepOriginal} />
+          ) : phase === 'deal' && officialPrize ? (
+            <DealPanel prize={officialPrize} onEnd={dealEndGame} onSeeWhat={dealSeeWhat} />
+          ) : (
+            <div className="grid grid-cols-5 auto-rows-fr gap-1 sm:gap-1.5 md:gap-2.5 h-full w-full">
+              {game.boxes.map((box) => (
+                <BoxTile
+                  key={box.id}
+                  box={box}
+                  disabled={disabled || (phase === 'swapPick' && box.isPlayerBox)}
+                  isActive={activeBoxId === box.id}
+                  swapPickMode={phase === 'swapPick' && !box.isPlayerBox && !box.opened}
+                  onOpen={handleBoxClick}
+                />
+              ))}
+            </div>
+          )}
         </div>
         <div className="min-h-0 overflow-hidden">
           <PrizeBoard prizes={board.right} eliminatedIds={eliminatedIds} align="right" />
@@ -269,17 +368,7 @@ export default function GameScreen() {
         {phase === 'reveal' && revealedPrize && (
           <RevealOverlay key="reveal" prize={revealedPrize} onContinue={continueAfterReveal} />
         )}
-        {phase === 'banker' && bankerOffer && (
-          <BankerModal
-            key="banker"
-            subphase={bankerSub}
-            offer={bankerOffer}
-            onDeal={bankerDeal}
-            onKeep={bankerKeep}
-          />
-        )}
         {phase === 'swap' && <SwapModal key="swap" onKeep={swapKeep} onSwap={swapChoose} />}
-        {phase === 'final' && <FinalModal key="final" onKeep={finalKeep} onSwap={finalSwap} />}
         {phase === 'finalReveal' && (
           <div key="finalreveal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
             <motion.div
