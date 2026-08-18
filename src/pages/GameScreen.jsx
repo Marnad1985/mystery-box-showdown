@@ -66,12 +66,13 @@ export default function GameScreen() {
   const eliminatedIds = game.boxes.filter((b) => b.opened).map((b) => b.prize.id);
   const unopened = unopenedCount(game);
   const opened = openedCount(game);
-  const disabled = phase !== 'playing' && phase !== 'swapPick' && phase !== 'postDeal';
+  const disabled = phase !== 'playing' && phase !== 'swapPick' && phase !== 'postDeal' && phase !== 'finalOpen';
 
   function handleBoxClick(box) {
     if (phase === 'playing') openBox(box);
     else if (phase === 'swapPick') doSwapPick(box);
     else if (phase === 'postDeal') openBoxAny(box);
+    else if (phase === 'finalOpen') openFinalPlayerBox(box);
   }
 
   function openBox(box) {
@@ -181,10 +182,35 @@ export default function GameScreen() {
     resolveFinal(false);
   }
   function swapConfirm() {
-    resolveFinal(true);
+    // Perform the swap internally only. Do NOT reveal anything — return to the
+    // box screen so the player must manually open their new box.
+    setGame((g) => {
+      const otherBox = g.boxes.find((b) => !b.opened && b.id !== g.playerBoxId);
+      return {
+        ...g,
+        boxes: g.boxes.map((b) =>
+          b.id === g.playerBoxId ? { ...b, isPlayerBox: false } : b.id === otherBox.id ? { ...b, isPlayerBox: true } : b
+        ),
+        playerBoxId: otherBox.id,
+      };
+    });
+    setPhase('finalOpen');
   }
   function swapKeepOriginal() {
     resolveFinal(false);
+  }
+  function openFinalPlayerBox(box) {
+    if (!box.isPlayerBox || box.opened) return;
+    setPhase('finalReveal');
+    const t = setTimeout(() => {
+      const playerBox = game.boxes.find((b) => b.id === game.playerBoxId);
+      const otherBox = game.boxes.find((b) => !b.opened && b.id !== game.playerBoxId);
+      setWonPrize(playerBox.prize);
+      setOtherPrize(otherBox.prize);
+      setSourceLabel('YOU WON!');
+      setPhase('won');
+    }, 2600);
+    timers.current.push(t);
   }
   function dealEndGame() {
     setWonPrize(officialPrize);
@@ -269,6 +295,8 @@ export default function GameScreen() {
       ? 'CHOOSE A BOX TO SWAP WITH YOUR BOX'
       : phase === 'opening'
       ? 'OPENING...'
+      : phase === 'finalOpen'
+      ? 'OPEN YOUR BOX'
       : phase === 'postDeal'
       ? unopened === 0
         ? 'ALL BOXES REVEALED'
@@ -350,7 +378,7 @@ export default function GameScreen() {
                 <BoxTile
                   key={box.id}
                   box={box}
-                  disabled={disabled || (phase === 'swapPick' && box.isPlayerBox)}
+                  disabled={disabled || (phase === 'swapPick' && box.isPlayerBox) || (phase === 'finalOpen' && !box.isPlayerBox)}
                   isActive={activeBoxId === box.id}
                   swapPickMode={phase === 'swapPick' && !box.isPlayerBox && !box.opened}
                   onOpen={handleBoxClick}
