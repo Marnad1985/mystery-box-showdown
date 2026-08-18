@@ -207,34 +207,34 @@ export default function GameScreen() {
       : '';
 
   return (
-    <div className="min-h-screen w-full bg-[radial-gradient(ellipse_at_top,#1e1b4b,#0b1020_60%)] text-white flex flex-col">
-      <header className="flex items-center justify-between px-4 md:px-8 py-3 border-b border-white/10">
-        <div>
-          <h1 className="text-2xl md:text-4xl font-black tracking-tight bg-gradient-to-r from-amber-300 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent">
+    <div className="h-[100dvh] w-full overflow-hidden bg-[radial-gradient(ellipse_at_top,#1e1b4b,#0b1020_60%)] text-white flex flex-col">
+      <header className="flex items-center justify-between px-3 md:px-6 py-1.5 md:py-2 border-b border-white/10 shrink-0">
+        <div className="min-w-0">
+          <h1 className="text-lg md:text-3xl font-black tracking-tight bg-gradient-to-r from-amber-300 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent leading-none">
             MYSTERY BOX LIVE
           </h1>
-          <p className="text-[10px] md:text-xs text-white/60 tracking-[0.3em]">HOTEL GAME SHOW</p>
+          <p className="hidden md:block text-[10px] text-white/60 tracking-[0.3em] mt-0.5">HOTEL GAME SHOW</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
           <span className="hidden md:inline text-white/70 text-sm">
             Boxes left: <b className="text-amber-300">{unopened}</b>
           </span>
           <button
             onClick={newGame}
-            className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold border border-white/20"
+            className="px-2.5 py-1 md:px-3 md:py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs md:text-sm font-semibold border border-white/20"
           >
             New Game
           </button>
           <button
             onClick={() => navigate('/')}
-            className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold border border-white/20"
+            className="px-2.5 py-1 md:px-3 md:py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs md:text-sm font-semibold border border-white/20"
           >
             Setup
           </button>
         </div>
       </header>
 
-      <div className="text-center py-2 text-amber-200 font-bold tracking-[0.3em] text-sm md:text-base h-10">
+      <div className="text-center py-1 text-amber-200 font-bold tracking-[0.3em] text-xs md:text-sm h-7 md:h-9 shrink-0 flex items-center justify-center">
         <AnimatePresence mode="wait">
           <motion.span key={instruction} initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             {instruction}
@@ -242,12 +242,12 @@ export default function GameScreen() {
         </AnimatePresence>
       </div>
 
-      <main className="flex-1 grid grid-cols-1 md:grid-cols-[1fr_2fr_1fr] gap-3 md:gap-6 px-3 md:px-8 pb-6">
-        <div className="order-2 md:order-1 self-center">
+      <main className="flex-1 min-h-0 grid grid-cols-[70px_1fr_70px] sm:grid-cols-[110px_1fr_110px] md:grid-cols-[1fr_2fr_1fr] lg:grid-cols-[1fr_2.5fr_1fr] gap-1 sm:gap-2 md:gap-4 px-1.5 sm:px-3 md:px-6 pb-2 md:pb-4">
+        <div className="min-h-0 overflow-hidden">
           <PrizeBoard prizes={board.left} eliminatedIds={eliminatedIds} align="left" />
         </div>
-        <div className="order-1 md:order-2 flex items-center justify-center">
-          <div className="grid gap-2 md:gap-3 w-full max-w-2xl grid-cols-3 sm:grid-cols-4 md:grid-cols-5">
+        <div className="min-h-0 flex items-center justify-center">
+          <div className="grid grid-cols-5 auto-rows-fr gap-1 sm:gap-1.5 md:gap-2.5 h-full w-full">
             {game.boxes.map((box) => (
               <BoxTile
                 key={box.id}
@@ -260,7 +260,7 @@ export default function GameScreen() {
             ))}
           </div>
         </div>
-        <div className="order-3 self-center">
+        <div className="min-h-0 overflow-hidden">
           <PrizeBoard prizes={board.right} eliminatedIds={eliminatedIds} align="right" />
         </div>
       </main>
