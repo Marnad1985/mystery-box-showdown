@@ -160,7 +160,20 @@ export function computeBankerOffer(game, pool, numBoxes, opts = {}) {
   const baseFactor = 0.4 + 0.4 * progress + Math.min(0.15, (game.rejectedOffers || []).length * 0.03);
   let target = avg * baseFactor;
 
-  const highAlive = remaining.some((b) => (b.prize.value || 0) >= HIGH_VALUE);
+  // ---- Offer-type analysis (gift-first; cash is the exception) ----
+  const allPrizes = game.boxes.map((b) => b.prize);
+  const cashBoxCount = allPrizes.filter((p) => isCashOffer(p)).length;
+  const cashOnlyGame = cashBoxCount >= Math.ceil(allPrizes.length * 0.9);
+  // "Meaningful" cash = a cash prize worth at least HIGH_VALUE (e.g. €5, €10).
+  // Tiny cash (€0.05–€1) does NOT justify a cash Banker offer.
+  const meaningfulCashAlive = remaining.some(
+    (b) => isCashOffer(b.prize) && (b.prize.value || 0) >= HIGH_VALUE
+  );
+  // Game stage by unopened count.
+  const unopened = remaining.length;
+  const lateThreshold = Math.max(3, Math.ceil(numBoxes / 3));
+  const earlyThreshold = Math.max(lateThreshold + 1, Math.ceil(numBoxes * 2 / 3));
+  const stage = unopened <= lateThreshold ? 'late' : unopened >= earlyThreshold ? 'early' : 'middle';
 
   // Occasional no-offer call (mid-game only) — keeps the Banker unpredictable.
   if (!opts.final && Math.random() < 0.08) {
@@ -177,9 +190,24 @@ export function computeBankerOffer(game, pool, numBoxes, opts = {}) {
   if (bluff) lean = -lean;
   target = target * (1 + lean);
 
-  // Cash vs gift preference. Low/normal board → mostly gifts; dangerous board → more cash.
-  let cashProb = highAlive ? 0.6 : 0.2;
-  if (playerValue >= HIGH_VALUE && !bluff) cashProb = Math.min(0.85, cashProb + 0.2);
+  // Gifts/vouchers are the Banker's main currency. Cash is reserved for
+  // late-game boards with meaningful cash prizes still at risk, or for
+  // cash-only games configured by the Admin. The player's hidden box never
+  // forces a cash offer on its own — a valuable gift box is bought out with
+  // another gift, and a valuable cash box is already reflected in
+  // meaningfulCashAlive above.
+  let cashProb;
+  if (cashOnlyGame) {
+    cashProb = 1;
+  } else if (!meaningfulCashAlive) {
+    cashProb = 0.03; // almost always gifts, even late in the game
+  } else if (stage === 'late') {
+    cashProb = 0.5;
+  } else if (stage === 'middle') {
+    cashProb = 0.15;
+  } else {
+    cashProb = 0.05;
+  }
   const wantCash = Math.random() < cashProb;
 
   const cashItems = pool.filter(isCashOffer);
