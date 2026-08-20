@@ -9,6 +9,7 @@ import ScrollToTop from './components/ScrollToTop';
 // Add page imports here
 import AdminSetup from './pages/AdminSetup';
 import GameScreen from './pages/GameScreen';
+import BoxAssignmentProof from './pages/BoxAssignmentProof';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -38,6 +39,7 @@ const AuthenticatedApp = () => {
     <Routes>
       {/* Add your page Route elements here */}
       <Route path="/" element={<AdminSetup />} />
+      <Route path="/proof" element={<BoxAssignmentProof />} />
       <Route path="/game" element={<GameScreen />} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>

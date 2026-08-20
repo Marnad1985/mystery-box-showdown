@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PrizeEditor from '@/components/mystery/PrizeEditor';
-import { defaultPrizes, defaultBankerPool, LEVELS, LEVEL_COLORS } from '@/lib/gameLogic';
+import { defaultPrizes, defaultBankerPool, LEVELS, LEVEL_COLORS, createRound, saveRound } from '@/lib/gameLogic';
 
 const CONFIG_KEY = 'mysterybox.config';
 const BOX_OPTIONS = [5, 10, 15, 20];
@@ -57,8 +57,11 @@ export default function AdminSetup() {
       setError('Every Banker offer needs a name.');
       return;
     }
-    localStorage.setItem(CONFIG_KEY, JSON.stringify({ numBoxes, prizes, bankerPool }));
-    navigate('/game');
+    const cfg = { numBoxes, prizes, bankerPool };
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    const round = createRound(cfg);
+    saveRound(round);
+    navigate('/proof');
   }
 
   return (

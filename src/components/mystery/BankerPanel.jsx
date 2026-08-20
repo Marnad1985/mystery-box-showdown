@@ -16,6 +16,25 @@ export default function BankerPanel({ subphase, offer, onDeal, onKeep }) {
             THE BANKER IS CALLING...
           </p>
         </>
+      ) : subphase === 'noOffer' && offer ? (
+        <>
+          <p className="text-amber-300 text-sm md:text-2xl tracking-[0.2em] font-bold">THE BANKER'S CALL</p>
+          <motion.div
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 200 }}
+            style={{ background: 'linear-gradient(135deg,#1e293b,#0f172a)', boxShadow: '0 0 50px rgba(251,191,36,0.5)' }}
+            className="px-6 py-5 md:px-10 md:py-8 rounded-2xl md:rounded-3xl border-2 border-amber-400/60 max-w-md"
+          >
+            <span className="text-lg md:text-3xl font-black text-amber-200 italic block">{offer.message}</span>
+          </motion.div>
+          <button
+            onClick={onKeep}
+            className="px-5 py-2.5 md:px-9 md:py-3.5 rounded-full bg-gradient-to-br from-rose-500 to-rose-700 text-white font-black text-base md:text-xl hover:scale-105 transition shadow-lg shadow-rose-500/40"
+          >
+            CONTINUE
+          </button>
+        </>
       ) : (
         <>
           <p className="text-amber-300 text-sm md:text-2xl tracking-[0.2em] font-bold">THE BANKER'S OFFER</p>
@@ -28,6 +47,9 @@ export default function BankerPanel({ subphase, offer, onDeal, onKeep }) {
           >
             <span className="text-3xl md:text-6xl font-black text-amber-200">{offer.name}</span>
           </motion.div>
+          {offer.message && (
+            <p className="text-amber-200/80 italic text-sm md:text-lg max-w-md">{offer.message}</p>
+          )}
           <p className="text-white/80 text-sm md:text-lg">Take the offer and end the game?</p>
           <div className="flex flex-col sm:flex-row gap-3 md:gap-4">
             <button

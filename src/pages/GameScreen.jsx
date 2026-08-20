@@ -12,7 +12,7 @@ import FinalDecisionPanel from '@/components/mystery/FinalDecisionPanel';
 import FinalBankerPanel from '@/components/mystery/FinalBankerPanel';
 import SwapConfirmPanel from '@/components/mystery/SwapConfirmPanel';
 import DealPanel from '@/components/mystery/DealPanel';
-import { initGame, unopenedCount, openedCount, computeBankerOffer, splitBoard } from '@/lib/gameLogic';
+import { initGame, unopenedCount, openedCount, computeBankerOffer, splitBoard, createRound, loadRound, saveRound, completeRound } from '@/lib/gameLogic';
 import { playBell, playOpen, playWin } from '@/lib/sound';
 
 const CONFIG_KEY = 'mysterybox.config';
@@ -27,7 +27,12 @@ function loadConfig() {
 export default function GameScreen() {
   const navigate = useNavigate();
   const [config] = useState(loadConfig);
-  const [game, setGame] = useState(() => (config ? initGame(config.prizes, config.numBoxes) : null));
+  const roundRef = useRef(loadRound());
+  const historyRef = useRef(
+    roundRef.current?.history || { swaps: [], bankerOffers: [], initialAssignments: [], originalPlayerBox: null }
+  );
+  const completedRef = useRef(false);
+  const [game, setGame] = useState(() => (roundRef.current && roundRef.current.status === 'active' ? roundRef.current.game : null));
   const [phase, setPhase] = useState('playing');
   const [activeBoxId, setActiveBoxId] = useState(null);
   const [revealedPrize, setRevealedPrize] = useState(null);
@@ -48,15 +53,35 @@ export default function GameScreen() {
     if (phase === 'won') {
       playWin();
       confetti({ particleCount: 120, spread: 90, origin: { y: 0.6 } });
+      if (roundRef.current && roundRef.current.status === 'active' && !completedRef.current) {
+        completedRef.current = true;
+        completeRound(roundRef.current, wonPrize, {
+          swaps: historyRef.current.swaps,
+          bankerOffers: historyRef.current.bankerOffers,
+        });
+      }
     }
   }, [phase]);
 
-  if (!config || !game) {
+  if (!config) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-slate-900 text-white">
         <p className="text-xl">No game configured yet.</p>
         <button onClick={() => navigate('/')} className="px-6 py-2 rounded-full bg-amber-400 text-slate-900 font-bold">
           Go to Setup
+        </button>
+      </div>
+    );
+  }
+  if (!roundRef.current || roundRef.current.status !== 'active' || !game) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-slate-900 text-white">
+        <p className="text-xl">No active round.</p>
+        <button
+          onClick={() => navigate(roundRef.current ? '/proof' : '/')}
+          className="px-6 py-2 rounded-full bg-amber-400 text-slate-900 font-bold"
+        >
+          {roundRef.current ? 'Open Box Assignment Proof' : 'Go to Setup'}
         </button>
       </div>
     );
@@ -121,17 +146,26 @@ export default function GameScreen() {
     setBankerSub('calling');
     setPhase('banker');
     playBell();
-    const t = setTimeout(() => setBankerSub('offer'), 2400);
+    if (offer && offer.noOffer) {
+      historyRef.current.bankerOffers.push({ noOffer: true, message: offer.message, at: new Date().toISOString() });
+    } else if (offer) {
+      historyRef.current.bankerOffers.push({ name: offer.name, value: offer.value, accepted: false, at: new Date().toISOString() });
+    }
+    const t = setTimeout(() => setBankerSub(offer && offer.noOffer ? 'noOffer' : 'offer'), 2400);
     timers.current.push(t);
   }
 
   function bankerDeal() {
     setOfficialPrize(bankerOffer);
+    const arr = historyRef.current.bankerOffers;
+    if (arr.length && !arr[arr.length - 1].noOffer) arr[arr.length - 1].accepted = true;
     setPhase('deal');
   }
 
   function bankerKeep() {
-    setGame((g) => ({ ...g, rejectedOffers: [...g.rejectedOffers, bankerOffer] }));
+    if (bankerOffer && !bankerOffer.noOffer) {
+      setGame((g) => ({ ...g, rejectedOffers: [...g.rejectedOffers, bankerOffer] }));
+    }
     setBankerOffer(null);
     setPhase('playing');
   }
@@ -148,18 +182,20 @@ export default function GameScreen() {
 
   function doSwapPick(box) {
     if (box.isPlayerBox || box.opened) return;
+    const oldPlayer = game.boxes.find((b) => b.id === game.playerBoxId);
     setGame((g) => {
       const boxes = g.boxes.map((b) =>
         b.id === g.playerBoxId ? { ...b, isPlayerBox: false } : b.id === box.id ? { ...b, isPlayerBox: true } : b
       );
       return { ...g, boxes, playerBoxId: box.id, swapsUsed: [...g.swapsUsed, pendingSwapPoint] };
     });
+    historyRef.current.swaps.push({ type: 'mid', from: oldPlayer?.number, to: box.number, at: new Date().toISOString() });
     setPendingSwapPoint(null);
     setPhase('playing');
   }
 
   function finalKeep() {
-    const offer = computeBankerOffer(game, config.bankerPool, config.numBoxes);
+    const offer = computeBankerOffer(game, config.bankerPool, config.numBoxes, { final: true });
     setFinalBankerOffer(offer);
     setBankerSub('calling');
     setPhase('finalKeepBanker');
@@ -184,6 +220,8 @@ export default function GameScreen() {
   function swapConfirm() {
     // Perform the swap internally only. Do NOT reveal anything — return to the
     // box screen so the player must manually open their new box.
+    const oldPlayer = game.boxes.find((b) => b.id === game.playerBoxId);
+    const newPlayer = game.boxes.find((b) => !b.opened && b.id !== game.playerBoxId);
     setGame((g) => {
       const otherBox = g.boxes.find((b) => !b.opened && b.id !== g.playerBoxId);
       return {
@@ -194,6 +232,7 @@ export default function GameScreen() {
         playerBoxId: otherBox.id,
       };
     });
+    historyRef.current.swaps.push({ type: 'final', from: oldPlayer?.number, to: newPlayer?.number, at: new Date().toISOString() });
     setPhase('finalOpen');
   }
   function swapKeepOriginal() {
@@ -275,17 +314,9 @@ export default function GameScreen() {
   function newGame() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
-    setGame(initGame(config.prizes, config.numBoxes));
-    setPhase('playing');
-    setActiveBoxId(null);
-    setRevealedPrize(null);
-    setBankerOffer(null);
-    setWonPrize(null);
-    setOtherPrize(null);
-    setPendingSwapPoint(null);
-    setOfficialPrize(null);
-    setFinalBankerOffer(null);
-    setRevealReturn('playing');
+    const r = createRound(config);
+    saveRound(r);
+    navigate('/proof');
   }
 
   const instruction =

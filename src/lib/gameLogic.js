@@ -106,29 +106,177 @@ export function initGame(prizes, numBoxes) {
 export const unopenedCount = (g) => g.boxes.filter((b) => !b.opened).length;
 export const openedCount = (g) => g.boxes.filter((b) => b.opened).length;
 
-export function computeBankerOffer(game, pool, numBoxes) {
-  const remaining = game.boxes.filter((b) => !b.opened);
-  if (!remaining.length || !pool.length) return null;
-  const total = remaining.reduce((s, b) => s + (b.prize.value || 0), 0);
-  const avg = total / remaining.length;
-  const progress = (numBoxes - remaining.length) / numBoxes;
-  const factor = 0.4 + 0.4 * progress + Math.min(0.15, game.rejectedOffers.length * 0.03);
-  const target = avg * factor;
-  const sorted = [...pool].sort((a, b) => (a.value || 0) - (b.value || 0));
-  let best = sorted[0];
+const CURRENCY_RE = /^€/;
+const isCashOffer = (item) => CURRENCY_RE.test((item?.name || '').trim());
+
+const BANKER_MESSAGES = [
+  'The Banker thinks you should stop.',
+  'Interesting choice...',
+  'The Banker is getting nervous.',
+  'That one hurt.',
+  'The Banker has something for you.',
+  "He thinks someone in your family is giving you terrible advice.",
+];
+const NO_OFFER_MESSAGES = [
+  'He just wanted to wish you good luck. 😈',
+  "He's just calling to say... nice box. 😈",
+  'The Banker is just admiring your courage. 😈',
+];
+
+const HIGH_VALUE = 5;
+
+function pickClosest(items, target, avoid) {
+  const sorted = [...items].sort((a, b) => (a.value || 0) - (b.value || 0));
+  let pool2 = sorted;
+  if (avoid && sorted.length > 1) {
+    const filtered = sorted.filter((p) => p.name !== avoid.name);
+    if (filtered.length) pool2 = filtered;
+  }
+  let best = pool2[0];
   let bestDiff = Infinity;
-  for (const item of sorted) {
-    const diff = Math.abs((item.value || 0) - target);
+  for (const it of pool2) {
+    const v = it.value || 0;
+    let diff = Math.abs(v - target);
+    if (v > target) diff = (v - target) * 1.6; // discourage large overpay
     if (diff < bestDiff) {
       bestDiff = diff;
-      best = item;
+      best = it;
     }
   }
   return best;
+}
+
+// The Banker engine is allowed to know every locked box's contents (including
+// the player's box) and uses that hidden knowledge ~75-85% of the time, with
+// controlled bluffing ~15-25%. It never directly reveals box contents.
+export function computeBankerOffer(game, pool, numBoxes, opts = {}) {
+  const remaining = game.boxes.filter((b) => !b.opened);
+  if (!remaining.length || !pool.length) return null;
+  const playerBox = game.boxes.find((b) => b.id === game.playerBoxId);
+  const playerValue = playerBox ? playerBox.prize.value || 0 : 0;
+  const total = remaining.reduce((s, b) => s + (b.prize.value || 0), 0);
+  const avg = total / remaining.length;
+  const progress = (numBoxes - remaining.length) / numBoxes;
+  const baseFactor = 0.4 + 0.4 * progress + Math.min(0.15, (game.rejectedOffers || []).length * 0.03);
+  let target = avg * baseFactor;
+
+  const highAlive = remaining.some((b) => (b.prize.value || 0) >= HIGH_VALUE);
+
+  // Occasional no-offer call (mid-game only) — keeps the Banker unpredictable.
+  if (!opts.final && Math.random() < 0.08) {
+    return { noOffer: true, message: NO_OFFER_MESSAGES[Math.floor(Math.random() * NO_OFFER_MESSAGES.length)] };
+  }
+
+  // Bluff ~20% of the time (within the 15-25% guidance).
+  const bluff = Math.random() < 0.2;
+
+  // Strategic lean from hidden player-box knowledge.
+  let lean = 0;
+  if (playerValue >= HIGH_VALUE) lean = 0.15;   // valuable box → Banker pushes to buy out
+  else if (playerValue <= 1) lean = -0.1;        // low box → Banker relaxes (or bluffs the opposite)
+  if (bluff) lean = -lean;
+  target = target * (1 + lean);
+
+  // Cash vs gift preference. Low/normal board → mostly gifts; dangerous board → more cash.
+  let cashProb = highAlive ? 0.6 : 0.2;
+  if (playerValue >= HIGH_VALUE && !bluff) cashProb = Math.min(0.85, cashProb + 0.2);
+  const wantCash = Math.random() < cashProb;
+
+  const cashItems = pool.filter(isCashOffer);
+  const giftItems = pool.filter((p) => !isCashOffer(p));
+  let candidates = wantCash ? cashItems : giftItems;
+  if (!candidates.length) candidates = wantCash ? giftItems : cashItems;
+  if (!candidates.length) return null;
+
+  const lastRejected = (game.rejectedOffers || []).slice(-1)[0];
+  const chosen = pickClosest(candidates, target, lastRejected);
+
+  const message = Math.random() < 0.4 ? BANKER_MESSAGES[Math.floor(Math.random() * BANKER_MESSAGES.length)] : null;
+  return { ...chosen, message, bluff };
 }
 
 export function splitBoard(prizes) {
   const sorted = [...prizes].sort((a, b) => a.value - b.value);
   const half = Math.ceil(sorted.length / 2);
   return { left: sorted.slice(0, half), right: sorted.slice(half) };
+}
+
+// ---- Round management: lockable assignments + fairness record ----
+const ROUND_KEY = 'mysterybox.round';
+const HISTORY_KEY = 'mysterybox.history';
+
+export function createRound(config) {
+  const game = initGame(config.prizes, config.numBoxes);
+  const playerBox = game.boxes.find((b) => b.id === game.playerBoxId);
+  const roundId = 'RND-' + Date.now().toString(36).toUpperCase();
+  return {
+    roundId,
+    createdAt: new Date().toISOString(),
+    lockedAt: null,
+    status: 'pending', // pending -> active -> completed
+    numBoxes: config.numBoxes,
+    game,
+    history: {
+      startTimestamp: null,
+      endTimestamp: null,
+      initialAssignments: game.boxes.map((b) => ({ box: b.number, prize: b.prize.name, value: b.prize.value })),
+      originalPlayerBox: playerBox.number,
+      swaps: [],
+      bankerOffers: [],
+      finalPrize: null,
+    },
+  };
+}
+
+export function loadRound() {
+  try {
+    const r = localStorage.getItem(ROUND_KEY);
+    if (r) return JSON.parse(r);
+  } catch {}
+  return null;
+}
+export function saveRound(round) {
+  try {
+    localStorage.setItem(ROUND_KEY, JSON.stringify(round));
+  } catch {}
+}
+export function loadHistory() {
+  try {
+    const r = localStorage.getItem(HISTORY_KEY);
+    if (r) return JSON.parse(r);
+  } catch {}
+  return [];
+}
+export function saveHistory(h) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0, 50)));
+  } catch {}
+}
+export function completeRound(round, finalPrize, historyUpdates) {
+  const completed = {
+    ...round,
+    status: 'completed',
+    history: {
+      ...round.history,
+      ...historyUpdates,
+      endTimestamp: new Date().toISOString(),
+      finalPrize: finalPrize?.name || finalPrize || null,
+    },
+  };
+  saveRound(completed);
+  const hist = loadHistory();
+  hist.unshift({
+    roundId: completed.roundId,
+    createdAt: completed.createdAt,
+    lockedAt: completed.lockedAt,
+    startTimestamp: completed.history.startTimestamp,
+    endTimestamp: completed.history.endTimestamp,
+    initialAssignments: completed.history.initialAssignments,
+    originalPlayerBox: completed.history.originalPlayerBox,
+    swaps: completed.history.swaps,
+    bankerOffers: completed.history.bankerOffers,
+    finalPrize: completed.history.finalPrize,
+  });
+  saveHistory(hist);
+  return completed;
 }
